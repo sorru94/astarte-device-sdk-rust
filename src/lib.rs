@@ -103,6 +103,9 @@ pub enum AstarteError {
 
     #[error("generic error")]
     Unreported,
+
+    #[error("conversion error")]
+    ConversionError,
 }
 
 #[derive(Debug, Clone)]

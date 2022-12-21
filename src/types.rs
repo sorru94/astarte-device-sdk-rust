@@ -17,10 +17,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
 use std::convert::TryInto;
 
 use bson::{Binary, Bson};
+use chrono::{DateTime, Utc};
 
 use crate::interface::MappingType;
 use crate::AstarteError;
@@ -156,6 +156,42 @@ impl std::convert::TryFrom<f32> for AstarteType {
     }
 }
 
+// we implement TryFrom<AstarteType> to all the base types, using this macro
+macro_rules! impl_reverse_type_conversion_traits {
+    ($(($astartetype:tt, $typ:ty),)*) => {
+        $(
+            impl std::convert::TryFrom<AstarteType> for $typ {
+                type Error = AstarteError;
+
+                fn try_from(var: AstarteType) -> Result<Self, Self::Error> {
+                    if let AstarteType::$astartetype(val) = var {
+                        Ok(val)
+                    } else {
+                        Err(AstarteError::ConversionError)
+                    }
+                }
+            }
+        )*
+    }
+}
+
+impl_reverse_type_conversion_traits!(
+    (Double, f64),
+    (Integer, i32),
+    (Boolean, bool),
+    (LongInteger, i64),
+    (String, String),
+    (BinaryBlob, Vec<u8>),
+    (DateTime, DateTime<Utc>),
+    (DoubleArray, Vec<f64>),
+    (IntegerArray, Vec<i32>),
+    (BooleanArray, Vec<bool>),
+    (LongIntegerArray, Vec<i64>),
+    (StringArray, Vec<String>),
+    (BinaryBlobArray, Vec<Vec<u8>>),
+    (DateTimeArray, Vec<DateTime<Utc>>),
+);
+
 impl From<AstarteType> for Bson {
     fn from(d: AstarteType) -> Self {
         match d {
@@ -278,9 +314,11 @@ impl AstarteType {
 #[cfg(test)]
 
 mod test {
+    use chrono::{DateTime, TimeZone, Utc};
     use std::collections::HashMap;
+    use std::convert::TryFrom;
 
-    use crate::{types::AstarteType, Aggregation, AstarteSdk};
+    use crate::{types::AstarteType, Aggregation, AstarteError, AstarteSdk};
 
     #[test]
     fn test_individual_serialization() {
@@ -398,5 +436,74 @@ mod test {
         assert!(AstarteType::Integer(12) == 12);
         assert!(AstarteType::String("hello".to_owned()) == "hello");
         assert!(AstarteType::BinaryBlob(vec![1, 2, 3, 4]) == vec![1_u8, 2, 3, 4]);
+    }
+
+    // we test TryFrom<AstarteType> to all the base types, using this two macro
+    macro_rules! test_reverse_type_conversion_traits_simple {
+        ($(($astartetype:tt, $typ:tt, $d:expr),)*) => {
+            $(
+                let data = $d;
+                let a_data = AstarteType::$astartetype(data.clone());
+                assert_eq!($typ::try_from(a_data)?, data);
+            )*
+        }
+    }
+    macro_rules! test_reverse_type_conversion_traits_complex {
+        ($(($astartetype:tt, $typ:tt, $subtyp:ty, $d:expr),)*) => {
+            $(
+                let data = $d;
+                let a_data = AstarteType::$astartetype(data.clone());
+                assert_eq!($typ::<$subtyp>::try_from(a_data)?, data);
+            )*
+        }
+    }
+
+    #[test]
+    fn test_conversion_from_astarte_type() -> Result<(), AstarteError> {
+        test_reverse_type_conversion_traits_simple!(
+            (Double, f64, 42.24),
+            (Integer, i32, 42),
+            (Boolean, bool, true),
+            (LongInteger, i64, 62),
+            (String, String, "something".to_string()),
+        );
+
+        test_reverse_type_conversion_traits_complex!(
+            (BinaryBlob, Vec, u8, vec![1, 2, 3]),
+            (
+                DateTime,
+                DateTime,
+                Utc,
+                TimeZone::timestamp_opt(&Utc, 1627580808, 12).unwrap()
+            ),
+            (DoubleArray, Vec, f64, vec![1.4, 2.4, 3.1]),
+            (IntegerArray, Vec, i32, vec![1, 2, 3]),
+            (BooleanArray, Vec, bool, vec![true, false, true]),
+            (LongIntegerArray, Vec, i64, vec![1, 2, 3]),
+            (
+                StringArray,
+                Vec,
+                String,
+                vec!["a".to_string(), "b".to_string(), "c".to_string()]
+            ),
+            (
+                BinaryBlobArray,
+                Vec,
+                Vec<u8>,
+                vec![vec![1, 2], vec![3, 4], vec![5, 6]]
+            ),
+            (
+                DateTimeArray,
+                Vec,
+                DateTime<Utc>,
+                vec![
+                    TimeZone::timestamp_opt(&Utc, 1627580808, 12).unwrap(),
+                    TimeZone::timestamp_opt(&Utc, 3455667775, 42).unwrap(),
+                    TimeZone::timestamp_opt(&Utc, 4646841646, 11).unwrap(),
+                ]
+            ),
+        );
+
+        Ok(())
     }
 }
